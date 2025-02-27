@@ -1,0 +1,362 @@
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
+#include <XPT2046_Touchscreen.h>
+#include <RTClib.h> // Library for real-time clock
+#include <EEPROM.h> // Library for persistent storage
+
+// Define the display drivers
+#define TFT1_CS 10
+#define TFT1_DC 8
+#define TFT1_RST 9
+#define TFT2_CS 11
+#define TFT2_DC 7
+#define TFT2_RST 9
+
+// Define the touch screen drivers
+#define TOUCH1_CS 53
+#define TOUCH1_IRQ 2
+#define TOUCH2_CS 49
+#define TOUCH2_IRQ 3
+
+Adafruit_ILI9341 tft1 = Adafruit_ILI9341(TFT1_CS, TFT1_DC, TFT1_RST);
+Adafruit_ILI9341 tft2 = Adafruit_ILI9341(TFT2_CS, TFT2_DC, TFT2_RST);
+XPT2046_Touchscreen ts1(TOUCH1_CS, TOUCH1_IRQ);
+XPT2046_Touchscreen ts2(TOUCH2_CS, TOUCH2_IRQ);
+RTC_DS3231 rtc; // Real-time clock object
+
+// Event storage
+struct Event {
+  int day;
+  int hour;
+  int minute;
+  char description[50];
+};
+
+Event events[31];
+
+void setup() {
+  Serial.begin(9600);
+  tft1.begin();
+  tft1.setRotation(0);
+  tft1.fillScreen(ILI9341_BLACK);
+  tft2.begin();
+  tft2.setRotation(0);
+  tft2.fillScreen(ILI9341_BLACK);
+  ts1.begin();
+  ts1.setRotation(0);
+  ts2.begin();
+  ts2.setRotation(0);
+
+  if (!rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while (1);
+  }
+
+  if (rtc.lostPower()) {
+    Serial.println("RTC lost power, setting the time!");
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
+
+  loadEvents();
+  showBootScreen();
+  delay(3000);
+  drawCalendar(tft1);
+  drawHourlySchedule(tft2);
+}
+
+void loop() {
+  if (ts1.touched()) {
+    TS_Point p = ts1.getPoint();
+    handleTouch(tft1, tft2, p.x, p.y);
+  }
+
+  if (ts2.touched()) {
+    TS_Point p = ts2.getPoint();
+    handleTouch(tft1, tft2, p.x, p.y);
+  }
+
+  checkReminders();
+}
+
+void showBootScreen() {
+  tft1.fillScreen(ILI9341_BLACK);
+  tft1.setTextColor(ILI9341_WHITE);
+  tft1.setTextSize(3);
+  tft1.setCursor(10, 100);
+  tft1.print("Sethsoft Phone");
+  tft2.fillScreen(ILI9341_BLACK);
+  tft2.setTextColor(ILI9341_WHITE);
+  tft2.setTextSize(3);
+  tft2.setCursor(10, 100);
+  tft2.print("Sethsoft Phone");
+}
+
+void drawCalendar(Adafruit_ILI9341 &tft) {
+  tft.fillScreen(ILI9341_BLACK);
+  DateTime now = rtc.now();
+  int daysInMonth = getDaysInMonth(now.month(), now.year());
+  int startDay = getDayOfWeek(1, now.month(), now.year());
+  tft.drawRect(5, 5, tft.width() - 10, tft.height() - 10, ILI9341_WHITE);
+  char monthStr[20];
+  sprintf(monthStr, "Month: %02d/%04d", now.month(), now.year());
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(10, 10);
+  tft.print(monthStr);
+
+  for (int i = 1; i <= daysInMonth; i++) {
+    int x = 10 + ((i + startDay - 1) % 7) * 30;
+    int y = 40 + ((i + startDay - 1) / 7) * 30;
+    if (i == now.day()) {
+      tft.fillRect(x - 2, y - 2, 28, 28, ILI9341_RED);
+      tft.setTextColor(ILI9341_WHITE);
+    } else {
+      tft.setTextColor(ILI9341_WHITE);
+    }
+    tft.setCursor(x, y);
+    tft.print(i);
+    if (events[i - 1].description[0] != '\0') {View 1
+      tft.fillCircle(x + 20, y + 10, 3, ILI9341_GREEN);
+    }
+  }
+
+  drawButton(tft, 10, 300, 100, 40, ILI9341_BLUE, "Add Event");
+  drawButton(tft, 120, 300, 100, 40, ILI9341_GREEN, "Edit Event");
+}
+
+void drawHourlySchedule(Adafruit_ILI9341 &tft) {
+  tft.fillScreen(ILI9341_BLACK);
+  tft.drawRect(5, 5, tft.width() - 10, tft.height() - 10, ILI9341_WHITE);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(10, 10);
+  tft.print("Hourly Schedule");
+
+  for (int i = 0; i < 24; i++) {
+    tft.setCursor(10, 40 + i * 20);
+    tft.print(i);
+    tft.print(":00");
+  }
+}
+
+void drawButton(Adafruit_ILI9341 &tft, int x, int y, int w, int h, uint16_t color, const char* label) {
+  tft.fillRect(x, y, w, h, color);
+  tft.drawRect(x, y, w, h, ILI9341_WHITE);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  int16_t x1, y1;
+  uint16_t w1, h1;
+  tft.getTextBounds(label, x, y, &x1, &y1, &w1, &h1);
+  int textX = x + (w - w1) / 2;
+  int textY = y + (h - h1) / 2;
+  tft.setCursor(textX, textY);
+  tft.print(label);
+}
+
+void handleTouch(Adafruit_ILI9341 &tft1, Adafruit_ILI9341 &tft2, int x, int y) {
+  int screenX = map(x, 0, 4095, 0, tft1.width());
+  int screenY = map(y, 0, 4095, 0, tft1.height());
+
+  if (screenX > 10 && screenX < 110 && screenY > 300 && screenY < 340) {
+    addEvent();
+    drawCalendar(tft1);
+    drawHourlySchedule(tft2);
+    return;
+  }
+
+  if (screenX > 120 && screenX < 220 && screenY > 300 && screenY < 340) {
+    editEvent();
+    drawCalendar(tft1);
+    drawHourlySchedule(tft2);
+    return;
+  }
+
+  DateTime now = rtc.now();
+  int daysInMonth = getDaysInMonth(now.month(), now.year());
+  int startDay = getDayOfWeek(1, now.month(), now.year());
+
+  for (int i = 1; i <= daysInMonth; i++) {
+    int dayX = 10 + ((i + startDay - 1) % 7) * 30;
+    int dayY = 40 + ((i + startDay - 1) / 7) * 30;
+
+    if (screenX > dayX && screenX < dayX + 30 && screenY > dayY && screenY < dayY + 30) {
+      modifyEvent(i);
+      drawCalendar(tft1);
+      drawHourlySchedule(tft2);
+    }
+  }
+}
+
+void addEvent() {
+  DateTime now = rtc.now();
+  int day = now.day();
+  events[day - 1] = {day, 12, 0, "Event at 12:00"};
+  Serial.println("Added event for day " + String(day));
+}
+
+void editEvent() {
+  DateTime now = rtc.now();
+  int day = now.day();
+  if (events[day - 1].description[0] != '\0') {
+    events[day - 1].description[0] = '\0'; // Clear the event description
+    Serial.println("Cleared event for day " + String(day));
+  } else {
+    events[day - 1] = {day, 12, 0, "Edited event at 12:00"};
+    Serial.println("Edited event for day " + String(day));
+  }
+}
+
+void modifyEvent(int day) {
+  if (events[day - 1].description[0] == '\0') {
+    events[day - 1] = {day, 12, 0, "Event at 12:00"};
+  } else {
+    events[day - 1].description[0] = '\0'; // Clear the event description
+  }
+  Serial.println("Modified event for day " + String(day));
+}
+
+void checkReminders() {
+  DateTime now = rtc.now();
+  for (int i = 0; i < 31; i++) {
+    if (events[i].description[0] != '\0' && events[i].day == now.day() && events[i].hour == now.hour() && events[i].minute == now.minute()) {
+      showReminder(events[i].description);
+    }
+  }
+}
+
+void showReminder(const char* description) {
+  tft1.fillScreen(ILI9341_BLACK);
+  tft1.setTextColor(ILI9341_WHITE);
+  tft1.setTextSize(2);
+  tft1.setCursor(10, 100);
+  tft1.print("Reminder:");
+  tft1.setCursor(10, 140);
+  tft1.print(description);void addEvent() {
+  DateTime now = rtc.now();
+  int day = now.day();
+  events[day - 1] = {day, 12, 0, "Event at 12:00"};
+  Serial.println("Added event for day " + String(day));
+}
+
+void editEvent() {
+  DateTime now = rtc.now();
+  int day = now.day();
+  if (events[day - 1].description[0] != '\0') {
+    events[day - 1].description[0] = '\0'; // Clear the event description
+    Serial.println("Cleared event for day " + String(day));
+  } else {
+    events[day - 1] = {day, 12, 0, "Edited event at 12:00"};View 1
+    Serial.println("Edited event for day " + String(day));
+  }
+}
+
+void modifyEvent(int day) {
+  if (events[day - 1].description[0] == '\0') {
+    events[day - 1] = {day, 12, 0, "Event at 12:00"};
+  } else {
+    events[day - 1].description[0] = '\0'; // Clear the event description
+  }
+  Serial.println("Modified event for day " + String(day));
+}
+
+void checkReminders() {
+  DateTime now = rtc.now();
+  for (int i = 0; i < 31; i++) {
+    if (events[i].description[0] != '\0' && events[i].day == now.day() && events[i].hour == now.hour() && events[i].minute == now.minute()) {
+      showReminder(events[i].description);
+    }
+  }
+}
+
+void showReminder(const char* description) {
+  tft1.fillScreen(ILI9341_BLACK);
+  tft1.setTextColor(ILI9341_WHITE);
+  tft1.setTextSize(2);
+  tft1.setCursor(10, 100);
+  tft1.print("Reminder:");
+  tft1.setCursor(10, 140);
+  tft1.print(description);
+
+  delay(5000);
+  drawCalendar(tft1);
+  drawHourlySchedule(tft2);
+}
+
+int getDaysInMonth(int month, int year) {
+  if (month == 2) {
+    if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) {
+      return 29;
+    } else {
+      return 28;
+    }
+  } else if (month == 4 || month == 6 || month == 9 || month == 11) {
+    return 30;
+  } else {
+    return 31;
+  }
+}
+
+int getDayOfWeek(int day, int month, int year) {
+  if (month < 3) {
+    month += 12;
+    year--;
+  }
+  int k = year % 100;
+  int j = year / 100;
+  int h = (day + 13 * (month + 1) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
+  return (h + 5) % 7; // Adjust to make Sunday = 0View 1
+}
+
+void loadEvents() {
+  for (int i = 0; i < 31; i++) {
+    EEPROM.get(i * sizeof(Event), events[i]);
+  }
+}
+
+void saveEvents() {
+  for (int i = 0; i < 31; i++) {
+    EEPROM.put(i * sizeof(Event), events[i]);
+  }
+}
+
+  delay(5000);
+  drawCalendar(tft1);
+  drawHourlySchedule(tft2);
+}
+
+int getDaysInMonth(int month, int year) {
+  if (month == 2) {
+    if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) {
+      return 29;
+    } else {
+      return 28;
+    }
+  } else if (month == 4 || month == 6 || month == 9 || month == 11) {
+    return 30;
+  } else {
+    return 31;
+  }
+}
+
+int getDayOfWeek(int day, int month, int year) {
+  if (month < 3) {
+    month += 12;
+    year--;
+  }
+  int k = year % 100;
+  int j = year / 100;
+  int h = (day + 13 * (month + 1) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
+  return (h + 5) % 7; // Adjust to make Sunday = 0
+}
+
+void loadEvents() {
+  for (int i = 0; i < 31; i++) {
+    EEPROM.get(i * sizeof(Event), events[i]);
+  }
+}
+
+void saveEvents() {
+  for (int i = 0; i < 31; i++) {
+    EEPROM.put(i * sizeof(Event), events[i]);
+  }
+}
