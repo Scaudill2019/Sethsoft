@@ -30,6 +30,14 @@ struct Event {
   int hour;
   int minute;
   char description[50];
+
+  Event(int d = 0, int h = 0, int m = 0, const char* desc = "") {
+    day = d;
+    hour = h;
+    minute = m;
+    strncpy(description, desc, sizeof(description) - 1);
+    description[sizeof(description) - 1] = '\0';
+  }
 };
 
 Event events[31];
@@ -115,7 +123,7 @@ void drawCalendar(Adafruit_ILI9341 &tft) {
     }
     tft.setCursor(x, y);
     tft.print(i);
-    if (events[i - 1].description[0] != '\0') {View 1
+    if (events[i - 1].description[0] != '\0') {
       tft.fillCircle(x + 20, y + 10, 3, ILI9341_GREEN);
     }
   }
@@ -190,7 +198,7 @@ void handleTouch(Adafruit_ILI9341 &tft1, Adafruit_ILI9341 &tft2, int x, int y) {
 void addEvent() {
   DateTime now = rtc.now();
   int day = now.day();
-  events[day - 1] = {day, 12, 0, "Event at 12:00"};
+  events[day - 1] = Event(day, 12, 0, "Event at 12:00");
   Serial.println("Added event for day " + String(day));
 }
 
@@ -201,58 +209,14 @@ void editEvent() {
     events[day - 1].description[0] = '\0'; // Clear the event description
     Serial.println("Cleared event for day " + String(day));
   } else {
-    events[day - 1] = {day, 12, 0, "Edited event at 12:00"};
+    events[day - 1] = Event(day, 12, 0, "Edited event at 12:00");
     Serial.println("Edited event for day " + String(day));
   }
 }
 
 void modifyEvent(int day) {
   if (events[day - 1].description[0] == '\0') {
-    events[day - 1] = {day, 12, 0, "Event at 12:00"};
-  } else {
-    events[day - 1].description[0] = '\0'; // Clear the event description
-  }
-  Serial.println("Modified event for day " + String(day));
-}
-
-void checkReminders() {
-  DateTime now = rtc.now();
-  for (int i = 0; i < 31; i++) {
-    if (events[i].description[0] != '\0' && events[i].day == now.day() && events[i].hour == now.hour() && events[i].minute == now.minute()) {
-      showReminder(events[i].description);
-    }
-  }
-}
-
-void showReminder(const char* description) {
-  tft1.fillScreen(ILI9341_BLACK);
-  tft1.setTextColor(ILI9341_WHITE);
-  tft1.setTextSize(2);
-  tft1.setCursor(10, 100);
-  tft1.print("Reminder:");
-  tft1.setCursor(10, 140);
-  tft1.print(description);void addEvent() {
-  DateTime now = rtc.now();
-  int day = now.day();
-  events[day - 1] = {day, 12, 0, "Event at 12:00"};
-  Serial.println("Added event for day " + String(day));
-}
-
-void editEvent() {
-  DateTime now = rtc.now();
-  int day = now.day();
-  if (events[day - 1].description[0] != '\0') {
-    events[day - 1].description[0] = '\0'; // Clear the event description
-    Serial.println("Cleared event for day " + String(day));
-  } else {
-    events[day - 1] = {day, 12, 0, "Edited event at 12:00"};View 1
-    Serial.println("Edited event for day " + String(day));
-  }
-}
-
-void modifyEvent(int day) {
-  if (events[day - 1].description[0] == '\0') {
-    events[day - 1] = {day, 12, 0, "Event at 12:00"};
+    events[day - 1] = Event(day, 12, 0, "Event at 12:00");
   } else {
     events[day - 1].description[0] = '\0'; // Clear the event description
   }
@@ -276,48 +240,6 @@ void showReminder(const char* description) {
   tft1.print("Reminder:");
   tft1.setCursor(10, 140);
   tft1.print(description);
-
-  delay(5000);
-  drawCalendar(tft1);
-  drawHourlySchedule(tft2);
-}
-
-int getDaysInMonth(int month, int year) {
-  if (month == 2) {
-    if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) {
-      return 29;
-    } else {
-      return 28;
-    }
-  } else if (month == 4 || month == 6 || month == 9 || month == 11) {
-    return 30;
-  } else {
-    return 31;
-  }
-}
-
-int getDayOfWeek(int day, int month, int year) {
-  if (month < 3) {
-    month += 12;
-    year--;
-  }
-  int k = year % 100;
-  int j = year / 100;
-  int h = (day + 13 * (month + 1) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
-  return (h + 5) % 7; // Adjust to make Sunday = 0View 1
-}
-
-void loadEvents() {
-  for (int i = 0; i < 31; i++) {
-    EEPROM.get(i * sizeof(Event), events[i]);
-  }
-}
-
-void saveEvents() {
-  for (int i = 0; i < 31; i++) {
-    EEPROM.put(i * sizeof(Event), events[i]);
-  }
-}
 
   delay(5000);
   drawCalendar(tft1);
